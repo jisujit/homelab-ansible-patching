@@ -4,18 +4,36 @@
   gather_facts: yes
   vars:
     assessment_date: "{{ ansible_date_time.iso8601 }}"
-    backup_dir: "/var/backups/pre-patch-{{ ansible_date_time.epoch }}"
-
+    backup_dir: "/tmp/pre-patch-{{ ansible_date_time.epoch }}"
+    
   tasks:
-    - name: Create assessment directory with proper permissions
+    - name: Create assessment directory in /tmp
       file:
         path: "{{ backup_dir }}"
         state: directory
         mode: '0755'
-        recurse: yes
       become: yes
 
-    - name: Verify backup directory exists
+    - name: Create var backups directory if not exists
+      file:
+        path: "/var/backups"
+        state: directory
+        mode: '0755'
+      become: yes
+
+    - name: Create final backup directory
+      file:
+        path: "/var/backups/pre-patch-{{ ansible_date_time.epoch }}"
+        state: directory
+        mode: '0755'
+      become: yes
+      register: final_backup_dir
+
+    - name: Set backup directory variable
+      set_fact:
+        backup_dir: "/var/backups/pre-patch-{{ ansible_date_time.epoch }}"
+
+    - name: Verify final backup directory exists
       stat:
         path: "{{ backup_dir }}"
       register: backup_dir_check
@@ -23,7 +41,10 @@
 
     - name: Debug backup directory status
       debug:
-        msg: "Backup directory {{ backup_dir }} exists: {{ backup_dir_check.stat.exists }}"
+        msg: 
+          - "Backup directory: {{ backup_dir }}"
+          - "Directory exists: {{ backup_dir_check.stat.exists }}"
+          - "Directory creation result: {{ final_backup_dir.changed }}"
 
     - name: Gather system information
       setup:
@@ -82,78 +103,47 @@
 
     - name: Check if critical services are running
       set_fact:
-        running_critical_services: "{{ services_before.ansible_facts.services.keys() |
-          intersect(critical_services) |
-          select('match', '.*\\.(service|socket)$') |
+        running_critical_services: "{{ services_before.ansible_facts.services.keys() | 
+          intersect(critical_services) | 
+          select('match', '.*\\.(service|socket)$') | 
           list }}"
 
-    - name: Create system snapshot report JSON content
-      set_fact:
-        report_content: |
-          {
-            "hostname": "{{ inventory_hostname }}",
-            "assessment_date": "{{ assessment_date }}",
-            "os_info": {
-              "family": "{{ ansible_os_family }}",
-              "distribution": "{{ ansible_distribution }}",
-              "version": "{{ ansible_distribution_version }}",
-              "kernel": "{{ ansible_kernel }}"
-            },
-            "system_status": {
-              "uptime_seconds": {{ ansible_uptime_seconds }},
-              "available_updates": {{ ubuntu_updates.stdout_lines | default([]) | length if ansible_os_family == 'Debian' else rhel_updates.results | default([]) | length }},
-              "disk_usage": {{ ansible_mounts | to_json }},
-              "running_services": {{ running_critical_services | to_json }}
-            },
-            "backup_location": "{{ backup_dir }}",
-            "criticality": "{{ criticality | default('medium') }}",
-            "patch_group": "{{ patch_group | default('default') }}"
-          }
-
     - name: Write system snapshot report
-      copy:
-        content: "{{ report_content }}"
-        dest: "{{ backup_dir }}/pre_patch_report.json"
-        mode: '0644'
+      shell: |
+        cat > {{ backup_dir }}/pre_patch_report.json << 'EOL'
+        {
+          "hostname": "{{ inventory_hostname }}",
+          "assessment_date": "{{ assessment_date }}",
+          "os_info": {
+            "family": "{{ ansible_os_family }}",
+            "distribution": "{{ ansible_distribution }}",
+            "version": "{{ ansible_distribution_version }}",
+            "kernel": "{{ ansible_kernel }}"
+          },
+          "system_status": {
+            "uptime_seconds": {{ ansible_uptime_seconds }},
+            "available_updates": {{ ubuntu_updates.stdout_lines | default([]) | length if ansible_os_family == 'Debian' else rhel_updates.results | default([]) | length }},
+            "running_services": {{ running_critical_services | length }}
+          },
+          "backup_location": "{{ backup_dir }}",
+          "criticality": "{{ criticality | default('medium') }}",
+          "patch_group": "{{ patch_group | default('default') }}"
+        }
+        EOL
       become: yes
 
-    - name: Backup package list (Ubuntu/Debian)
+    - name: Backup package list (Ubuntu/Debian)  
       shell: "dpkg -l > {{ backup_dir }}/installed_packages.txt"
       when: ansible_os_family == "Debian"
       become: yes
 
-    - name: Backup package list (RHEL/CentOS)
-      shell: "rpm -qa > {{ backup_dir }}/installed_packages.txt"
-      when: ansible_os_family == "RedHat"
-      become: yes
-
     - name: Backup critical configuration files
-      copy:
-        src: "{{ item }}"
-        dest: "{{ backup_dir }}/{{ item | basename }}"
-        remote_src: yes
-        mode: '0644'
+      shell: "cp {{ item }} {{ backup_dir }}/{{ item | basename }} || true"
       loop:
         - /etc/fstab
         - /etc/hosts
         - /etc/resolv.conf
-        - /etc/crontab
-      ignore_errors: yes
       become: yes
-
-    - name: Notify n8n workflow of assessment
-      uri:
-        url: "http://192.168.9.128:5678/webhook/patching"
-        method: POST
-        body_format: json
-        body:
-          event: "assessment_complete"
-          hostname: "{{ inventory_hostname }}"
-          criticality: "{{ criticality | default('medium') }}"
-          available_updates: "{{ ubuntu_updates.stdout_lines | default([]) | length if ansible_os_family == 'Debian' else rhel_updates.results | default([]) | length }}"
-          backup_location: "{{ backup_dir }}"
-      delegate_to: localhost
-      ignore_errors: yes
 
     - name: Display assessment summary
       debug:
