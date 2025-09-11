@@ -1,0 +1,67 @@
+---
+all:
+  vars:
+    # HomeLab global variables
+    ansible_ssh_private_key_file: "/var/lib/awx/.ssh/homelab_patching"
+    backup_location: "192.168.9.13:/volume1/backups/patching"
+    notification_webhook: "http://192.168.9.128:5678/webhook/patching"
+    
+  children:
+    homelab_systems:
+      children:
+        ubuntu_systems:
+          vars:
+            ansible_python_interpreter: /usr/bin/python3
+            package_manager: apt
+            patch_exclusions: []
+            os_family: ubuntu
+            
+          hosts:
+            vm-401-paperless:
+              ansible_host: 192.168.9.180
+              ansible_user: paperlessadmin
+              patch_group: "document_management"
+              criticality: "medium"
+              services:
+                - paperless-webserver
+                - paperless-worker
+                - paperless-scheduler
+              os_version: "24.04"
+              description: "Paperless-NGX document management system"
+              
+        rhel_systems:
+          vars:
+            ansible_python_interpreter: /usr/bin/python3
+            package_manager: dnf
+            patch_exclusions:
+              - kernel*
+            os_family: rhel
+            
+        # Logical groupings for patch management
+        critical_systems:
+          vars:
+            patch_type: "security"
+            batch_size: 1
+            require_approval: true
+            rollback_timeout: 300
+            
+        standard_systems:
+          vars:
+            patch_type: "all"
+            batch_size: 3
+            require_approval: false
+            rollback_timeout: 180
+          children:
+            ubuntu_systems:
+            
+        database_servers:
+          vars:
+            backup_before_patch: true
+            special_handling: true
+            service_stop_timeout: 60
+            
+        kubernetes_nodes:
+          vars:
+            k8s_cluster: "homelab-k3s"
+            drain_before_patch: true
+            drain_timeout: 300

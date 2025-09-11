@@ -1,0 +1,102 @@
+---
+- name: Post-Patch Health Validation
+  hosts: all
+  gather_facts: yes
+  tasks:
+    - name: Gather post-patch system facts
+      setup:
+
+    - name: Check system uptime
+      command: uptime
+      register: system_uptime
+      changed_when: false
+
+    - name: Verify critical services are running
+      service:
+        name: "{{ item }}"
+        state: started
+      loop: "{{ running_critical_services | default([]) }}"
+      register: service_check
+      ignore_errors: yes
+
+    - name: Test web server connectivity (if running)
+      uri:
+        url: "http://localhost:{{ item }}"
+        method: GET
+        status_code: [200, 301, 302, 403]
+      register: web_health
+      loop:
+        - 80
+        - 443
+        - 8080
+      when: "('apache2' in (running_critical_services | default([]))) or ('httpd' in (running_critical_services | default([]))) or ('nginx' in (running_critical_services | default([])))"
+      ignore_errors: yes
+
+    - name: Check disk space after patching
+      setup:
+        filter: ansible_mounts
+      register: post_patch_disk
+
+    - name: Verify disk space is still adequate
+      assert:
+        that:
+          - item.size_available > 1073741824  # 1GB minimum
+        fail_msg: "Low disk space warning on {{ item.mount }}"
+        success_msg: "Disk space OK on {{ item.mount }}"
+      loop: "{{ ansible_mounts }}"
+      when: item.mount == "/"
+      ignore_errors: yes
+
+    - name: Check for any failed systemd services
+      shell: systemctl --failed --no-legend
+      register: failed_services
+      changed_when: false
+      
+    - name: Display failed services warning
+      debug:
+        msg: "WARNING: Failed services detected: {{ failed_services.stdout_lines }}"
+      when: failed_services.stdout_lines | length > 0
+
+    - name: Test network connectivity
+      command: ping -c 3 8.8.8.8
+      register: network_test
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Compile health check results
+      set_fact:
+        health_check_results:
+          timestamp: "{{ ansible_date_time.iso8601 }}"
+          system_responsive: "{{ system_uptime.rc == 0 }}"
+          services_healthy: "{{ service_check.results | selectattr('failed', 'undefined') | list | length == (service_check.results | length) if service_check.results is defined else true }}"
+          web_services_healthy: "{{ web_health.results | selectattr('failed', 'undefined') | list | length > 0 if web_health.results is defined else true }}"
+          disk_space_ok: "{{ post_patch_disk.ansible_facts.ansible_mounts | selectattr('mount', 'equalto', '/') | first | json_query('size_available') > 1073741824 }}"
+          network_ok: "{{ network_test.rc == 0 }}"
+          failed_services_count: "{{ failed_services.stdout_lines | length }}"
+
+    - name: Overall health assessment
+      set_fact:
+        system_healthy: "{{ 
+          health_check_results.system_responsive and 
+          health_check_results.services_healthy and 
+          health_check_results.web_services_healthy and
+          health_check_results.disk_space_ok and
+          health_check_results.network_ok and
+          health_check_results.failed_services_count == 0 
+        }}"
+
+    - name: Display health check summary
+      debug:
+        var: health_check_results
+
+    - name: Fail if critical health checks failed
+      fail:
+        msg: "Post-patch health checks failed. System may be in degraded state."
+      when: 
+        - not system_healthy
+        - rollback_on_failure | default(true) | bool
+
+    - name: Log successful health validation
+      debug:
+        msg: "All health checks passed for {{ inventory_hostname }}"
+      when: system_healthy

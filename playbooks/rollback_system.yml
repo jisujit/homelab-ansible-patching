@@ -1,0 +1,107 @@
+---
+- name: Emergency System Rollback
+  hosts: all
+  gather_facts: yes
+  tasks:
+    - name: Begin rollback procedure
+      debug:
+        msg: "Starting rollback procedure for {{ inventory_hostname }}"
+
+    - name: Find backup directory
+      find:
+        paths: /var/backups
+        patterns: "pre-patch-*"
+        file_type: directory
+      register: backup_dirs
+
+    - name: Get most recent backup directory
+      set_fact:
+        latest_backup: "{{ backup_dirs.files | sort(attribute='mtime') | last | json_query('path') }}"
+      when: backup_dirs.files | length > 0
+
+    - name: Fail if no backup found
+      fail:
+        msg: "No backup directory found. Cannot perform rollback."
+      when: backup_dirs.files | length == 0
+
+    - name: Display rollback source
+      debug:
+        msg: "Rolling back from: {{ latest_backup }}"
+
+    - block:
+        - name: Rollback using dnf history (RHEL/CentOS)
+          block:
+            - name: Get last dnf transaction ID
+              shell: dnf history list | head -4 | tail -1 | awk '{print $1}'
+              register: last_transaction_id
+              
+            - name: Rollback dnf transaction
+              command: "dnf history undo {{ last_transaction_id.stdout }} -y"
+              register: dnf_rollback_result
+              
+          when: 
+            - ansible_os_family == "RedHat"
+            - patch_results is defined
+            - patch_results.changed | default(false)
+
+        - name: Rollback using apt (Ubuntu/Debian)
+          block:
+            - name: Read pre-patch package list
+              slurp:
+                src: "{{ latest_backup }}/installed_packages.txt"
+              register: original_packages
+
+            - name: Attempt package downgrade (limited effectiveness)
+              debug:
+                msg: "Debian/Ubuntu rollback is complex. Manual intervention may be required."
+                
+          when: 
+            - ansible_os_family == "Debian"
+            - patch_results is defined
+            - patch_results.changed | default(false)
+
+      rescue:
+        - name: Package rollback failed
+          debug:
+            msg: "Automatic package rollback failed. Proceeding with configuration restore."
+
+    - name: Restore critical configuration files
+      copy:
+        src: "{{ latest_backup }}/{{ item | basename }}"
+        dest: "{{ item }}"
+        backup: yes
+        mode: preserve
+      loop:
+        - /etc/fstab
+        - /etc/hosts
+        - /etc/resolv.conf
+        - /etc/crontab
+      ignore_errors: yes
+
+    - name: Restart critical services
+      systemd:
+        name: "{{ item }}"
+        state: restarted
+        daemon_reload: yes
+      loop: "{{ running_critical_services | default([]) }}"
+      ignore_errors: yes
+
+    - name: Wait for services to stabilize
+      wait_for:
+        timeout: 30
+
+    - name: Log rollback completion
+      debug:
+        msg: "Rollback procedure completed for {{ inventory_hostname }}. Manual verification recommended."
+
+    - name: Notify n8n of rollback
+      uri:
+        url: "{{ n8n_webhook_base }}/patching"
+        method: POST
+        body_format: json
+        body:
+          event: "rollback_complete"
+          hostname: "{{ inventory_hostname }}"
+          rollback_source: "{{ latest_backup }}"
+      delegate_to: localhost
+      ignore_errors: yes

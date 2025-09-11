@@ -1,0 +1,24 @@
+{
+  "hostname": "{{ inventory_hostname }}",
+  "assessment_date": "{{ assessment_date }}",
+  "os_info": {
+    "family": "{{ ansible_os_family }}",
+    "distribution": "{{ ansible_distribution }}",
+    "version": "{{ ansible_distribution_version }}",
+    "kernel": "{{ ansible_kernel }}"
+  },
+  "system_status": {
+    "uptime_seconds": {{ ansible_uptime_seconds }},
+    "available_updates": {{ available_updates | default([]) | length }},
+    "disk_usage": {{ ansible_mounts | to_json }},
+    "running_services": {{ running_critical_services | default([]) | to_json }}
+  },
+  "backup_location": "{{ backup_dir }}",
+  "criticality": "{{ criticality | default('unknown') }}",
+  "patch_group": "{{ patch_group | default('default') }}",
+  "integration": {
+    "zabbix_server": "{{ zabbix_server }}",
+    "n8n_server": "{{ n8n_server }}",
+    "nas_backup": "{{ nas_backup_enabled | default(false) }}"
+  }
+}

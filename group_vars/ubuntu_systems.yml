@@ -1,0 +1,26 @@
+---
+# Ubuntu-specific variables
+package_update_command: "apt update"
+package_upgrade_command: "apt upgrade -y"
+package_list_command: "apt list --upgradable"
+security_update_command: "unattended-upgrade --dry-run"
+
+# Service management
+service_manager: systemd
+reboot_required_file: "/var/run/reboot-required"
+
+# Ubuntu-specific exclusions
+patch_exclusions:
+  - "snap-*"  # Be careful with snap packages
+  - "*-dev"   # Development packages (optional)
+
+# Package manager configuration
+apt_cache_valid_time: 3600
+apt_install_recommends: false
+apt_autoremove: true
+apt_autoclean: true
+
+# Security settings
+unattended_upgrades_enabled: true
+auto_reboot_enabled: false
+auto_reboot_time: "02:00"

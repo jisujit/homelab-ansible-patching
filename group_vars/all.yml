@@ -1,0 +1,31 @@
+---
+# Global variables for all systems
+patch_maintenance_window: "02:00-06:00"
+rollback_on_failure: true
+health_check_retries: 3
+health_check_delay: 30
+backup_retention_days: 14
+
+# Notification settings
+slack_webhook_url: ""  # Add your Slack webhook if you have one
+email_recipients: []   # Add email addresses for reports
+
+# Zabbix integration (corrected IP)
+zabbix_server: "192.168.9.122"
+zabbix_api_url: "http://192.168.9.122/zabbix/api_jsonrpc.php"
+zabbix_auth_token: ""  # Add your Zabbix API token
+
+# NAS backup settings (your Synology)
+nas_backup_enabled: true
+nas_server: "192.168.9.13"
+nas_backup_path: "/volume1/backups/patching"
+nas_mount_point: "/mnt/nas_backup"
+
+# n8n integration (corrected IP)
+n8n_server: "192.168.9.128"
+n8n_webhook_base: "http://192.168.9.128:5678/webhook"
+
+# Proxmox integration
+proxmox_api_host: "192.168.9.50"
+proxmox_api_port: 8006
+proxmox_validate_certs: false

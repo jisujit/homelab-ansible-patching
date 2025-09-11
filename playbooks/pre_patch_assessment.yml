@@ -1,0 +1,138 @@
+---
+- name: HomeLab Pre-Patch Assessment
+  hosts: all
+  gather_facts: yes
+  vars:
+    assessment_date: "{{ ansible_date_time.iso8601 }}"
+    backup_dir: "/var/backups/pre-patch-{{ ansible_date_time.epoch }}"
+    
+  tasks:
+    - name: Create assessment directory
+      file:
+        path: "{{ backup_dir }}"
+        state: directory
+        mode: '0755'
+      become: yes
+
+    - name: Gather system information
+      setup:
+        gather_subset: all
+
+    - name: Check available updates (Ubuntu/Debian)
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      register: apt_update
+      when: ansible_os_family == "Debian"
+
+    - name: List upgradable packages (Ubuntu/Debian)
+      command: apt list --upgradable
+      register: ubuntu_updates
+      when: ansible_os_family == "Debian"
+      changed_when: false
+
+    - name: Check available updates (RHEL/CentOS)
+      dnf:
+        list: updates
+      register: rhel_updates
+      when: ansible_os_family == "RedHat"
+
+    - name: Check disk space
+      setup:
+        filter: ansible_mounts
+      register: disk_info
+
+    - name: Verify minimum disk space (2GB free in /)
+      assert:
+        that:
+          - item.size_available > 2147483648
+        fail_msg: "Insufficient disk space on {{ item.mount }}"
+        success_msg: "Sufficient disk space available"
+      loop: "{{ ansible_mounts }}"
+      when: item.mount == "/"
+
+    - name: Check running services
+      service_facts:
+      register: services_before
+
+    - name: Identify critical services
+      set_fact:
+        critical_services:
+          - postgresql
+          - mysql
+          - mariadb
+          - apache2
+          - httpd
+          - nginx
+          - docker
+          - kubelet
+          - paperless-webserver
+          - paperless-worker
+
+    - name: Check if critical services are running
+      set_fact:
+        running_critical_services: "{{ services_before.ansible_facts.services.keys() | 
+          intersect(critical_services) | 
+          select('match', '.*\\.(service|socket)$') | 
+          list }}"
+
+    - name: Create system snapshot report
+      template:
+        src: ../templates/pre_patch_report.j2
+        dest: "{{ backup_dir }}/pre_patch_report.json"
+        mode: '0644'
+      vars:
+        report_data:
+          hostname: "{{ inventory_hostname }}"
+          os_family: "{{ ansible_os_family }}"
+          os_version: "{{ ansible_distribution_version }}"
+          kernel_version: "{{ ansible_kernel }}"
+          uptime: "{{ ansible_uptime_seconds }}"
+          available_updates: "{{ ubuntu_updates.stdout_lines | default([]) if ansible_os_family == 'Debian' else rhel_updates.results | default([]) }}"
+          disk_usage: "{{ ansible_mounts }}"
+          running_services: "{{ running_critical_services }}"
+          assessment_timestamp: "{{ assessment_date }}"
+
+    - name: Backup package list (Ubuntu/Debian)  
+      shell: "dpkg -l > {{ backup_dir }}/installed_packages.txt"
+      when: ansible_os_family == "Debian"
+
+    - name: Backup package list (RHEL/CentOS)
+      shell: "rpm -qa > {{ backup_dir }}/installed_packages.txt"
+      when: ansible_os_family == "RedHat"
+
+    - name: Backup critical configuration files
+      copy:
+        src: "{{ item }}"
+        dest: "{{ backup_dir }}/{{ item | basename }}"
+        remote_src: yes
+        mode: '0644'
+      loop:
+        - /etc/fstab
+        - /etc/hosts
+        - /etc/resolv.conf
+        - /etc/crontab
+      ignore_errors: yes
+
+    - name: Notify n8n workflow of assessment
+      uri:
+        url: "{{ n8n_webhook_base }}/patching"
+        method: POST
+        body_format: json
+        body:
+          event: "assessment_complete"
+          hostname: "{{ inventory_hostname }}"
+          criticality: "{{ criticality }}"
+          available_updates: "{{ ubuntu_updates.stdout_lines | default([]) | length if ansible_os_family == 'Debian' else rhel_updates.results | default([]) | length }}"
+          backup_location: "{{ backup_dir }}"
+      delegate_to: localhost
+      ignore_errors: yes
+
+    - name: Display assessment summary
+      debug:
+        msg:
+          - "System: {{ inventory_hostname }}"
+          - "OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+          - "Updates available: {{ ubuntu_updates.stdout_lines | default([]) | length if ansible_os_family == 'Debian' else rhel_updates.results | default([]) | length }}"
+          - "Critical services running: {{ running_critical_services | length }}"
+          - "Backup location: {{ backup_dir }}"

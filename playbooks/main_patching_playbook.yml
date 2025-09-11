@@ -1,0 +1,158 @@
+---
+- name: Comprehensive Linux Patching with Rollback
+  hosts: all
+  serial: "{{ batch_size | default(1) }}"
+  gather_facts: yes
+  vars:
+    patch_type: "{{ patch_type | default('security') }}"
+    reboot_required: false
+    rollback_on_failure: "{{ rollback_on_failure | default(true) }}"
+    health_check_retries: 3
+    health_check_delay: 30
+    
+  tasks:
+    - block:
+        - name: Stop non-essential services before patching
+          systemd:
+            name: "{{ item }}"
+            state: stopped
+          loop: "{{ services_to_stop_before_patch | default([]) }}"
+          ignore_errors: yes
+
+        - name: Update package cache
+          package:
+            update_cache: yes
+          register: cache_update
+          
+        - name: Apply security updates only (Ubuntu/Debian)
+          apt:
+            upgrade: safe
+            update_cache: yes
+            cache_valid_time: 3600
+            autoremove: yes
+          register: ubuntu_patch_result
+          when: 
+            - ansible_os_family == "Debian"
+            - patch_type == "security"
+          notify:
+            - check reboot required debian
+
+        - name: Apply all updates (Ubuntu/Debian)
+          apt:
+            upgrade: dist
+            update_cache: yes
+            cache_valid_time: 3600
+            autoremove: yes
+          register: ubuntu_patch_result_all
+          when: 
+            - ansible_os_family == "Debian"
+            - patch_type == "all"
+          notify:
+            - check reboot required debian
+
+        - name: Apply security updates only (RHEL/CentOS)
+          dnf:
+            name: "*"
+            state: latest
+            security: yes
+            update_cache: yes
+          register: rhel_patch_result
+          when: 
+            - ansible_os_family == "RedHat"
+            - patch_type == "security"
+          notify:
+            - check reboot required rhel
+
+        - name: Apply all updates (RHEL/CentOS)
+          dnf:
+            name: "*"
+            state: latest
+            update_cache: yes
+          register: rhel_patch_result_all
+          when: 
+            - ansible_os_family == "RedHat"
+            - patch_type == "all"
+          notify:
+            - check reboot required rhel
+
+        - name: Restart essential services after patching
+          systemd:
+            name: "{{ item }}"
+            state: started
+          loop: "{{ services_to_stop_before_patch | default([]) }}"
+          ignore_errors: yes
+
+        - name: Record patching results
+          set_fact:
+            patching_successful: true
+            patch_results: "{{ rhel_patch_result | default(ubuntu_patch_result) | default(rhel_patch_result_all) | default(ubuntu_patch_result_all) }}"
+
+      rescue:
+        - name: Patching failed - prepare for rollback
+          set_fact:
+            patching_successful: false
+            patch_error: "{{ ansible_failed_result.msg }}"
+            
+        - name: Log patching failure
+          debug:
+            msg: "Patching failed on {{ inventory_hostname }}: {{ patch_error }}"
+            
+        - name: Trigger rollback flag
+          set_fact:
+            rollback_required: true
+          when: rollback_on_failure | bool
+
+  post_tasks:
+    - name: Flush handlers
+      meta: flush_handlers
+
+    - name: Reboot system if required
+      reboot:
+        reboot_timeout: 600
+        connect_timeout: 5
+        test_command: uptime
+      when: reboot_required | bool
+      register: reboot_result
+
+    - name: Wait for system to be ready
+      wait_for_connection:
+        delay: 30
+        timeout: 300
+      when: reboot_result is defined
+
+    - name: Notify n8n of patching completion
+      uri:
+        url: "{{ n8n_webhook_base }}/patching"
+        method: POST
+        body_format: json
+        body:
+          event: "patching_complete"
+          hostname: "{{ inventory_hostname }}"
+          success: "{{ patching_successful }}"
+          reboot_required: "{{ reboot_required }}"
+          patch_count: "{{ patch_results.changed | default(0) }}"
+      delegate_to: localhost
+      ignore_errors: yes
+
+  handlers:
+    - name: check reboot required rhel
+      shell: needs-restarting -r
+      register: rhel_reboot_check
+      failed_when: rhel_reboot_check.rc not in [0, 1]
+      changed_when: rhel_reboot_check.rc == 1
+      listen: "check reboot required rhel"
+      notify: set reboot flag
+
+    - name: check reboot required debian
+      stat:
+        path: /var/run/reboot-required
+      register: debian_reboot_check
+      listen: "check reboot required debian"
+      notify: set reboot flag
+
+    - name: set reboot flag
+      set_fact:
+        reboot_required: true
+      when: 
+        - (rhel_reboot_check is defined and rhel_reboot_check.rc == 1) or
+          (debian_reboot_check is defined and debian_reboot_check.stat.exists)

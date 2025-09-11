@@ -1,0 +1,15 @@
+---
+- name: Pre-Patch Assessment
+  import_playbook: pre_patch_assessment.yml
+  when: skip_assessment is not defined or not skip_assessment
+
+- name: Main Patching Process
+  import_playbook: main_patching_playbook.yml
+
+- name: Post-Patch Health Validation
+  import_playbook: health_checks.yml
+  when: skip_health_checks is not defined or not skip_health_checks
+
+- name: Emergency Rollback (if needed)
+  import_playbook: rollback_system.yml
+  when: rollback_required is defined and rollback_required
