@@ -5,16 +5,25 @@
   vars:
     assessment_date: "{{ ansible_date_time.iso8601 }}"
     backup_dir: "/var/backups/pre-patch-{{ ansible_date_time.epoch }}"
-    
+
   tasks:
-    - name: Create assessment directory
+    - name: Create assessment directory with proper permissions
       file:
         path: "{{ backup_dir }}"
         state: directory
         mode: '0755'
-        owner: "{{ ansible_user }}"
-        group: "{{ ansible_user }}"
+        recurse: yes
       become: yes
+
+    - name: Verify backup directory exists
+      stat:
+        path: "{{ backup_dir }}"
+      register: backup_dir_check
+      become: yes
+
+    - name: Debug backup directory status
+      debug:
+        msg: "Backup directory {{ backup_dir }} exists: {{ backup_dir_check.stat.exists }}"
 
     - name: Gather system information
       setup:
@@ -73,14 +82,14 @@
 
     - name: Check if critical services are running
       set_fact:
-        running_critical_services: "{{ services_before.ansible_facts.services.keys() | 
-          intersect(critical_services) | 
-          select('match', '.*\\.(service|socket)$') | 
+        running_critical_services: "{{ services_before.ansible_facts.services.keys() |
+          intersect(critical_services) |
+          select('match', '.*\\.(service|socket)$') |
           list }}"
 
-    - name: Create system snapshot report
-      copy:
-        content: |
+    - name: Create system snapshot report JSON content
+      set_fact:
+        report_content: |
           {
             "hostname": "{{ inventory_hostname }}",
             "assessment_date": "{{ assessment_date }}",
@@ -100,11 +109,15 @@
             "criticality": "{{ criticality | default('medium') }}",
             "patch_group": "{{ patch_group | default('default') }}"
           }
+
+    - name: Write system snapshot report
+      copy:
+        content: "{{ report_content }}"
         dest: "{{ backup_dir }}/pre_patch_report.json"
         mode: '0644'
       become: yes
 
-    - name: Backup package list (Ubuntu/Debian)  
+    - name: Backup package list (Ubuntu/Debian)
       shell: "dpkg -l > {{ backup_dir }}/installed_packages.txt"
       when: ansible_os_family == "Debian"
       become: yes
