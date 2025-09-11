@@ -17,8 +17,8 @@
   "criticality": "{{ criticality | default('unknown') }}",
   "patch_group": "{{ patch_group | default('default') }}",
   "integration": {
-    "zabbix_server": "{{ zabbix_server }}",
-    "n8n_server": "{{ n8n_server }}",
+    "zabbix_server": "{{ zabbix_server | default('192.168.9.122') }}",
+    "n8n_server": "{{ n8n_server | default('192.168.9.128') }}",
     "nas_backup": "{{ nas_backup_enabled | default(false) }}"
   }
 }
