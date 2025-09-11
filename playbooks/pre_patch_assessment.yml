@@ -12,6 +12,8 @@
         path: "{{ backup_dir }}"
         state: directory
         mode: '0755'
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
       become: yes
 
     - name: Gather system information
@@ -77,29 +79,40 @@
           list }}"
 
     - name: Create system snapshot report
-      template:
-        src: ../templates/pre_patch_report.j2
+      copy:
+        content: |
+          {
+            "hostname": "{{ inventory_hostname }}",
+            "assessment_date": "{{ assessment_date }}",
+            "os_info": {
+              "family": "{{ ansible_os_family }}",
+              "distribution": "{{ ansible_distribution }}",
+              "version": "{{ ansible_distribution_version }}",
+              "kernel": "{{ ansible_kernel }}"
+            },
+            "system_status": {
+              "uptime_seconds": {{ ansible_uptime_seconds }},
+              "available_updates": {{ ubuntu_updates.stdout_lines | default([]) | length if ansible_os_family == 'Debian' else rhel_updates.results | default([]) | length }},
+              "disk_usage": {{ ansible_mounts | to_json }},
+              "running_services": {{ running_critical_services | to_json }}
+            },
+            "backup_location": "{{ backup_dir }}",
+            "criticality": "{{ criticality | default('medium') }}",
+            "patch_group": "{{ patch_group | default('default') }}"
+          }
         dest: "{{ backup_dir }}/pre_patch_report.json"
         mode: '0644'
-      vars:
-        report_data:
-          hostname: "{{ inventory_hostname }}"
-          os_family: "{{ ansible_os_family }}"
-          os_version: "{{ ansible_distribution_version }}"
-          kernel_version: "{{ ansible_kernel }}"
-          uptime: "{{ ansible_uptime_seconds }}"
-          available_updates: "{{ ubuntu_updates.stdout_lines | default([]) if ansible_os_family == 'Debian' else rhel_updates.results | default([]) }}"
-          disk_usage: "{{ ansible_mounts }}"
-          running_services: "{{ running_critical_services }}"
-          assessment_timestamp: "{{ assessment_date }}"
+      become: yes
 
     - name: Backup package list (Ubuntu/Debian)  
       shell: "dpkg -l > {{ backup_dir }}/installed_packages.txt"
       when: ansible_os_family == "Debian"
+      become: yes
 
     - name: Backup package list (RHEL/CentOS)
       shell: "rpm -qa > {{ backup_dir }}/installed_packages.txt"
       when: ansible_os_family == "RedHat"
+      become: yes
 
     - name: Backup critical configuration files
       copy:
@@ -113,16 +126,17 @@
         - /etc/resolv.conf
         - /etc/crontab
       ignore_errors: yes
+      become: yes
 
     - name: Notify n8n workflow of assessment
       uri:
-        url: "{{ n8n_webhook_base }}/patching"
+        url: "http://192.168.9.128:5678/webhook/patching"
         method: POST
         body_format: json
         body:
           event: "assessment_complete"
           hostname: "{{ inventory_hostname }}"
-          criticality: "{{ criticality }}"
+          criticality: "{{ criticality | default('medium') }}"
           available_updates: "{{ ubuntu_updates.stdout_lines | default([]) | length if ansible_os_family == 'Debian' else rhel_updates.results | default([]) | length }}"
           backup_location: "{{ backup_dir }}"
       delegate_to: localhost
