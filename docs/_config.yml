@@ -1,6 +1,6 @@
 title: Linux Patching Automation
 description: Enterprise-grade Linux patching automation framework
-theme: minima
+theme: jekyll-theme-architect
 markdown: kramdown
 highlighter: rouge
 
