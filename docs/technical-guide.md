@@ -1,5 +1,5 @@
 # Technical Documentation
-## Linux Patching Automation Framework - Technical Documentation
+
 
 ## Executive Summary
 
