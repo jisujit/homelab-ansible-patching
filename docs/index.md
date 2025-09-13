@@ -28,6 +28,7 @@ This project provides comprehensive Linux patching capabilities with automatic r
 
 - [Technical Documentation](technical-guide.md) - Complete technical reference
 - [Quick Start Guide](quick-start.md) - Getting started instructions
+- [Future Roadmap](Roadmap_09122025.md) - Enhancement plans and priorities
 - [GitHub Repository](https://github.com/jisujit/homelab-ansible-patching) - Source code
 
 ## Architecture

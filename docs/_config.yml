@@ -12,6 +12,7 @@ header_pages:
   - index.md
   - technical-guide.md
   - quick-start.md
+  - Roadmap_09122025.md
 
 github:
   repository_url: https://github.com/jisujit/homelab-ansible-patching
