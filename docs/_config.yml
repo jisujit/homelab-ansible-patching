@@ -1,0 +1,17 @@
+title: Linux Patching Automation
+description: Enterprise-grade Linux patching automation framework
+theme: minima
+markdown: kramdown
+highlighter: rouge
+
+plugins:
+  - jekyll-feed
+  - jekyll-sitemap
+
+header_pages:
+  - index.md
+  - technical-guide.md
+  - quick-start.md
+
+github:
+  repository_url: https://github.com/jisujit/homelab-ansible-patching
