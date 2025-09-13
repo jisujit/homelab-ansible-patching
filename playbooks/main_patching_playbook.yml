@@ -9,7 +9,7 @@
     rollback_on_failure: "{{ rollback_on_failure | default(true) }}"
     health_check_retries: 3
     health_check_delay: 30
-    
+
   tasks:
     - block:
         - name: Stop non-essential services before patching
@@ -23,7 +23,7 @@
           package:
             update_cache: yes
           register: cache_update
-          
+
         - name: Apply security updates only (Ubuntu/Debian)
           apt:
             upgrade: safe
@@ -31,7 +31,7 @@
             cache_valid_time: 3600
             autoremove: yes
           register: ubuntu_patch_result
-          when: 
+          when:
             - ansible_os_family == "Debian"
             - patch_type == "security"
           notify:
@@ -44,7 +44,7 @@
             cache_valid_time: 3600
             autoremove: yes
           register: ubuntu_patch_result_all
-          when: 
+          when:
             - ansible_os_family == "Debian"
             - patch_type == "all"
           notify:
@@ -57,7 +57,7 @@
             security: yes
             update_cache: yes
           register: rhel_patch_result
-          when: 
+          when:
             - ansible_os_family == "RedHat"
             - patch_type == "security"
           notify:
@@ -69,7 +69,7 @@
             state: latest
             update_cache: yes
           register: rhel_patch_result_all
-          when: 
+          when:
             - ansible_os_family == "RedHat"
             - patch_type == "all"
           notify:
@@ -92,11 +92,11 @@
           set_fact:
             patching_successful: false
             patch_error: "{{ ansible_failed_result.msg }}"
-            
+
         - name: Log patching failure
           debug:
             msg: "Patching failed on {{ inventory_hostname }}: {{ patch_error }}"
-            
+
         - name: Trigger rollback flag
           set_fact:
             rollback_required: true
@@ -122,14 +122,14 @@
 
     - name: Notify n8n of patching completion
       uri:
-        url: "{{ n8n_webhook_base }}/patching"
+        url: "{{ n8n_webhook_base | default('http://192.168.9.128:5678/webhook') }}/patching"
         method: POST
         body_format: json
         body:
           event: "patching_complete"
           hostname: "{{ inventory_hostname }}"
           success: "{{ patching_successful }}"
-          reboot_required: "{{ reboot_required }}"
+          reboot_required: "{{ reboot_required | default(false) }}"
           patch_count: "{{ patch_results.changed | default(0) }}"
       delegate_to: localhost
       ignore_errors: yes
@@ -153,6 +153,6 @@
     - name: set reboot flag
       set_fact:
         reboot_required: true
-      when: 
+      when:
         - (rhel_reboot_check is defined and rhel_reboot_check.rc == 1) or
           (debian_reboot_check is defined and debian_reboot_check.stat.exists)
