@@ -1,5 +1,5 @@
 # Technical Documentation
-# Linux Patching Automation Framework - Technical Documentation
+## Linux Patching Automation Framework - Technical Documentation
 
 ## Executive Summary
 
@@ -474,9 +474,9 @@ The framework is fully compatible with AWX (open-source version):
 
 ## Contact and Support
 
-**Repository**: https://github.com/jisujit/homelab-ansible-patching
-**Documentation**: README.md in repository
-**Issue Tracking**: GitHub Issues
-**Knowledge Base**: Technical documentation and operational procedures
+- **Repository**: https://github.com/jisujit/homelab-ansible-patching
+- **Documentation**: README.md in repository
+- **Issue Tracking**: GitHub Issues
+- **Knowledge Base**: Technical documentation and operational procedures
 
-This framework represents an enterprise-grade implementation suitable for scaling from HomeLab environments to production deployments managing hundreds of systems.# Linux Patching Automation Framework - Technical Documentation
+This framework represents an enterprise-grade implementation suitable for scaling from HomeLab environments to production deployments managing hundreds of systems.
